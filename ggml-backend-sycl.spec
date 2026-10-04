@@ -55,7 +55,24 @@ export CFLAGS="$_flags"
 export CXXFLAGS="$_flags"
 export LDFLAGS="$_ldflags"
 export CC=clang
-export CXX="%{_libdir}/intel-llvm/bin/icpx"
+# icpx compiles C++, but a link of .o files only does not pull in libstdc++.
+mkdir -p %{_builddir}/bin
+cat > %{_builddir}/bin/icpx << EOF
+#!/bin/sh
+link=1
+for arg in "\$@"; do
+	case "\$arg" in
+	-c|-E|-S|-fsyntax-only) link=0 ;;
+	esac
+done
+if [ "\$link" = 1 ]; then
+	exec %{_libdir}/intel-llvm/bin/icpx "\$@" -lstdc++
+else
+	exec %{_libdir}/intel-llvm/bin/icpx "\$@"
+fi
+EOF
+chmod 755 %{_builddir}/bin/icpx
+export CXX="%{_builddir}/bin/icpx"
 export CMAKE_GENERATOR=Ninja
 %cmake \
 	-DGGML_NATIVE:BOOL=OFF \
