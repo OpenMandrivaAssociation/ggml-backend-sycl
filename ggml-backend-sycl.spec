@@ -4,6 +4,7 @@
 # The plugin matches ggml %{version} (same tarball and the same ABI patches).
 
 %global _disable_lto 1
+%global debug_package %{nil}
 %global optflags %{optflags} -O3
 %global backend_dir %{_libdir}/ggml-backends-%{version}
 
