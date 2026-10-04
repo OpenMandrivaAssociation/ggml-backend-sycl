@@ -20,7 +20,6 @@ Patch1:		0002-backend-dl-quantize-tests.patch
 Patch2:		0003-test-backend-ops-case-counter.patch
 Patch3:		0004-max-name-160-and-i8-convrot.patch
 
-ExclusiveArch:	x86_64 znver1
 
 BuildRequires:	cmake
 BuildRequires:	ninja
