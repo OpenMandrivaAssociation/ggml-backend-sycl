@@ -28,6 +28,7 @@ BuildRequires:	intel-llvm
 BuildRequires:	onemath-devel
 BuildRequires:	onednn-devel
 BuildRequires:	pkgconfig(level-zero) >= 1.32.0
+BuildRequires:	opencl-headers
 
 Requires:	%{mklibname ggml}%{?_isa} >= %{version}
 
@@ -46,7 +47,8 @@ calls. Together this is the Intel counterpart of the ROCm/HIP backend.
 %build
 # Host -march and -flto from the distro flags break icpx device compilation.
 _flags=$(printf '%s' "%{optflags}" | sed -E 's/-flto//g; s/-g3//g; s/-gdwarf-4//g; s/-mfpmath=[^ ]+//g; s/ -m[a-z0-9+.=]+//g')
-_flags="$_flags -g0"
+# icpx does not search /usr/include, and its sycl headers include CL/cl.h.
+_flags="$_flags -g0 -I%{_includedir}"
 _ldflags=$(printf '%s' "%{build_ldflags}" | sed -E 's/-flto//g; s/-mfpmath=[^ ]+//g; s/ -m[a-z0-9+.=]+//g')
 export CFLAGS="$_flags"
 export CXXFLAGS="$_flags"
