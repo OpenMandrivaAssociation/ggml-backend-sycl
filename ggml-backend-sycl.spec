@@ -20,6 +20,7 @@ Patch0:		0001-llvm23-bf16-wmma-short-vectors.patch
 Patch1:		0002-backend-dl-quantize-tests.patch
 Patch2:		0003-test-backend-ops-case-counter.patch
 Patch3:		0004-max-name-160-and-i8-convrot.patch
+Patch4:		0005-solve-tri-trsm-loop.patch
 
 
 BuildRequires:	cmake
