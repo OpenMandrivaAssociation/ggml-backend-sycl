@@ -48,7 +48,14 @@ calls. Together this is the Intel counterpart of the ROCm/HIP backend.
 
 %build
 # Host -march and -flto from the distro flags break icpx device compilation.
-_flags=$(printf '%s' "%{optflags}" | sed -E 's/-flto//g; s/-g3//g; s/-gdwarf-4//g; s/-mfpmath=[^ ]+//g; s/ -m[a-z0-9+.=]+//g')
+# -fstack-protector-all is applied to the device compile as well, and on
+# aarch64 that combination did not finish a single SYCL file inside mock's
+# 40 hour rpmbuild limit.
+_flags=$(printf '%s' "%{optflags}" | sed -E 's/-flto//g; s/-g3//g; s/-gdwarf-4//g; s/-mfpmath=[^ ]+//g; s/ -m[a-z0-9+.=]+//g; s/-fstack-protector-all//g; s/--param=ssp-buffer-size=4//g')
+%ifarch aarch64
+_flags=$(printf '%s' "$_flags" | sed -E 's/-O[0-3s]//g')
+_flags="$_flags -O2"
+%endif
 # icpx does not search /usr/include, and its sycl headers include CL/cl.h.
 _flags="$_flags -g0 -I%{_includedir}"
 _ldflags=$(printf '%s' "%{build_ldflags}" | sed -E 's/-flto//g; s/-mfpmath=[^ ]+//g; s/ -m[a-z0-9+.=]+//g')
@@ -61,16 +68,22 @@ mkdir -p %{_builddir}/bin
 cat > %{_builddir}/bin/icpx << EOF
 #!/bin/sh
 link=1
+_last=
 for arg in "\$@"; do
+	_last=\$arg
 	case "\$arg" in
 	-c|-E|-S|-fsyntax-only) link=0 ;;
 	esac
 done
+echo "icpx-start \$(date -u +%Y-%m-%dT%H:%M:%SZ) \$(basename "\$_last")" >&2
 if [ "\$link" = 1 ]; then
-	exec %{_libdir}/intel-llvm/bin/icpx "\$@" -lstdc++
+	%{_libdir}/intel-llvm/bin/icpx "\$@" -lstdc++
 else
-	exec %{_libdir}/intel-llvm/bin/icpx "\$@"
+	%{_libdir}/intel-llvm/bin/icpx "\$@"
 fi
+rc=\$?
+echo "icpx-end \$(date -u +%Y-%m-%dT%H:%M:%SZ) rc=\$rc \$(basename "\$_last")" >&2
+exit \$rc
 EOF
 chmod 755 %{_builddir}/bin/icpx
 export CXX="%{_builddir}/bin/icpx"
@@ -81,7 +94,11 @@ export CMAKE_GENERATOR=Ninja
 	-DGGML_OPENMP:BOOL=OFF \
 	-DGGML_BACKEND_DL:BOOL=ON \
 	-DGGML_BACKEND_DIR=%{backend_dir} \
+%ifarch aarch64
+	-DGGML_CPU:BOOL=OFF \
+%else
 	-DGGML_CPU:BOOL=ON \
+%endif
 	-DGGML_CPU_ALL_VARIANTS:BOOL=OFF \
 	-DGGML_AVX:BOOL=OFF \
 	-DGGML_AVX2:BOOL=OFF \
@@ -101,7 +118,12 @@ export CMAKE_GENERATOR=Ninja
 	-DGGML_SYCL_DNN:BOOL=ON \
 	-DGGML_SYCL_SUPPORT_LEVEL_ZERO_API:BOOL=ON \
 	-DCMAKE_INSTALL_RPATH=%{_libdir}/intel-llvm/lib
+%ifarch aarch64
+# 32 concurrent icpx processes did not make it past the first SYCL file.
+ninja -v -j4
+%else
 ninja -v
+%endif
 
 %install
 _so=$(find build -name 'libggml-sycl.so' -print -quit)
