@@ -21,6 +21,7 @@ Patch1:		0002-backend-dl-quantize-tests.patch
 Patch2:		0003-test-backend-ops-case-counter.patch
 Patch3:		0004-max-name-160-and-i8-convrot.patch
 Patch4:		0005-solve-tri-trsm-loop.patch
+Patch5:		0006-sycl-device-skip-arm-neon.patch
 
 
 BuildRequires:	cmake
@@ -48,21 +49,10 @@ calls. Together this is the Intel counterpart of the ROCm/HIP backend.
 
 %build
 # Host -march and -flto from the distro flags break icpx device compilation.
-# -fstack-protector-all is applied to the device compile as well. On aarch64
-# neither -O3 with that flag (669832, stuck in mem.cpp) nor -O2 without it
-# (670084, stopped after libggml-base) finished a SYCL file inside mock's
-# 40 hour rpmbuild limit. Compile aarch64 at -O0.
-_flags=$(printf '%s' "%{optflags}" | sed -E 's/-flto//g; s/-g3//g; s/-gdwarf-4//g; s/-mfpmath=[^ ]+//g; s/ -m[a-z0-9+.=]+//g; s/-fstack-protector-all//g; s/--param=ssp-buffer-size=4//g')
-%ifarch aarch64
-_flags=$(printf '%s' "$_flags" | sed -E 's/-O[0-3s]//g')
-_flags="$_flags -O0"
-%endif
+_flags=$(printf '%s' "%{optflags}" | sed -E 's/-flto//g; s/-g3//g; s/-gdwarf-4//g; s/-mfpmath=[^ ]+//g; s/ -m[a-z0-9+.=]+//g')
 # icpx does not search /usr/include, and its sycl headers include CL/cl.h.
 _flags="$_flags -g0 -I%{_includedir}"
 _ldflags=$(printf '%s' "%{build_ldflags}" | sed -E 's/-flto//g; s/-mfpmath=[^ ]+//g; s/ -m[a-z0-9+.=]+//g')
-%ifarch aarch64
-_ldflags=$(printf '%s' "$_ldflags" | sed -E 's/-O[0-3s]//g; s/-g3//g; s/-gdwarf-4//g; s/-fstack-protector-all//g; s/--param=ssp-buffer-size=4//g')
-%endif
 export CFLAGS="$_flags"
 export CXXFLAGS="$_flags"
 export LDFLAGS="$_ldflags"
@@ -72,28 +62,16 @@ mkdir -p %{_builddir}/bin
 cat > %{_builddir}/bin/icpx << EOF
 #!/bin/sh
 link=1
-_last=
 for arg in "\$@"; do
-	_last=\$arg
 	case "\$arg" in
 	-c|-E|-S|-fsyntax-only) link=0 ;;
 	esac
 done
-_base=\$(basename -- "\$_last" 2>/dev/null || printf unknown)
-echo "icpx-start \$(date -u +%Y-%m-%dT%H:%M:%SZ) \$_base" >&2
-set -- %{_libdir}/intel-llvm/bin/icpx "\$@"
 if [ "\$link" = 1 ]; then
-	set -- "\$@" -lstdc++
+	exec %{_libdir}/intel-llvm/bin/icpx "\$@" -lstdc++
+else
+	exec %{_libdir}/intel-llvm/bin/icpx "\$@"
 fi
-# ICPX_TIMEOUT is set on aarch64 so one hung device compile cannot spend
-# the whole rpmbuild limit.
-if [ -n "\$ICPX_TIMEOUT" ]; then
-	set -- timeout --foreground "\$ICPX_TIMEOUT" "\$@"
-fi
-"\$@"
-rc=\$?
-echo "icpx-end \$(date -u +%Y-%m-%dT%H:%M:%SZ) rc=\$rc \$_base" >&2
-exit \$rc
 EOF
 chmod 755 %{_builddir}/bin/icpx
 export CXX="%{_builddir}/bin/icpx"
@@ -104,11 +82,7 @@ export CMAKE_GENERATOR=Ninja
 	-DGGML_OPENMP:BOOL=OFF \
 	-DGGML_BACKEND_DL:BOOL=ON \
 	-DGGML_BACKEND_DIR=%{backend_dir} \
-%ifarch aarch64
-	-DGGML_CPU:BOOL=OFF \
-%else
 	-DGGML_CPU:BOOL=ON \
-%endif
 	-DGGML_CPU_ALL_VARIANTS:BOOL=OFF \
 	-DGGML_AVX:BOOL=OFF \
 	-DGGML_AVX2:BOOL=OFF \
@@ -128,15 +102,7 @@ export CMAKE_GENERATOR=Ninja
 	-DGGML_SYCL_DNN:BOOL=ON \
 	-DGGML_SYCL_SUPPORT_LEVEL_ZERO_API:BOOL=ON \
 	-DCMAKE_INSTALL_RPATH=%{_libdir}/intel-llvm/lib
-%ifarch aarch64
-# One file at a time, with the command line flushed before icpx runs.
-# 45 minutes is enough for a real -O0 compile and short enough that a
-# hang still leaves a log.
-export ICPX_TIMEOUT=2700
-stdbuf -oL -eL ninja -v -j1
-%else
 ninja -v
-%endif
 
 %install
 _so=$(find build -name 'libggml-sycl.so' -print -quit)
